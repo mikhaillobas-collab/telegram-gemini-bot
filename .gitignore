@@ -1,0 +1,30 @@
+# Секреты и переменные окружения (НИКОГДА не попадут в Git)
+.env
+.env.*
+!.env.example
+
+# Python кэш и артефакты
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+
+# Виртуальные окружения
+venv/
+.venv/
+env/
+ENV/
+
+# IDE и редакторы
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Операционная система
+.DS_Store
+Thumbs.db

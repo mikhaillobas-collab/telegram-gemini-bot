@@ -1,0 +1,14 @@
+services:
+  telegram-gemini-bot:
+    build: .
+    container_name: telegram-gemini-bot
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - TELEGRAM_BOT_TOKEN
+      - GEMINI_API_KEY
+      - ALLOWED_USER_IDS
+      - GEMINI_MODEL
+      - SYSTEM_INSTRUCTION
