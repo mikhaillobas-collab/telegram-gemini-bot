@@ -12,3 +12,5 @@ services:
       - ALLOWED_USER_IDS
       - GEMINI_MODEL
       - SYSTEM_INSTRUCTION
+      - HTTPS_PROXY
+      - PROXY_URL

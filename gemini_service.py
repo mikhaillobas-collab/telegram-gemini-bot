@@ -19,7 +19,17 @@ class GeminiService:
 
     def _get_client(self) -> genai.Client:
         if self.client is None:
-            self.client = genai.Client(api_key=self.api_key)
+            http_options_kwargs = {}
+            if config.PROXY_URL:
+                logger.info("Используется прокси для Gemini API: %s", config.PROXY_URL)
+                http_options_kwargs["async_client_args"] = {"proxy": config.PROXY_URL}
+                http_options_kwargs["client_args"] = {"proxy": config.PROXY_URL}
+            if config.GEMINI_BASE_URL:
+                logger.info("Используется кастомный базовый URL: %s", config.GEMINI_BASE_URL)
+                http_options_kwargs["base_url"] = config.GEMINI_BASE_URL
+
+            http_options = types.HttpOptions(**http_options_kwargs) if http_options_kwargs else None
+            self.client = genai.Client(api_key=self.api_key, http_options=http_options)
         return self.client
 
     def _get_or_create_chat(self, user_id: int):
@@ -54,6 +64,17 @@ class GeminiService:
                 return "❌ Ошибка: Указан неверный GEMINI_API_KEY. Проверьте настройки API-ключа."
             if "RESOURCE_EXHAUSTED" in error_str:
                 return "⏳ Превышен лимит запросов (Rate Limit). Пожалуйста, подождите минуту и повторите попытку."
+            if "PERMISSIONDENIED" in error_str or "PERMISSION_DENIED" in error_str:
+                return (
+                    "❌ **Ошибка 403: Доступ заблокирован Google (PERMISSION_DENIED)**\n\n"
+                    "Причины:\n"
+                    "1. **Сервер находится в РФ**: Google Gemini API блокирует прямые запросы с российских IP.\n"
+                    "2. **Проект Google Cloud заблокирован**: Google наложил ограничения на проект, где создан ключ.\n\n"
+                    "**Как решить:**\n"
+                    "• Укажите прокси в переменной окружения `HTTPS_PROXY` (например, `http://user:pass@ip:port`)\n"
+                    "• Либо перенесите бота на любой зарубежный хостинг / VPS (Европа, Казахстан и т.д.)\n"
+                    "• Либо создайте ключ в НОВОМ проекте на aistudio.google.com под VPN."
+                )
             return f"❌ Ошибка при обработке запроса: {e}"
 
     def reset_chat(self, user_id: int) -> bool:
