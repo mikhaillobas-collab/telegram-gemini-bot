@@ -1,6 +1,7 @@
 import asyncio
 import logging
-from typing import Dict, Optional
+from typing import Dict, List, Optional
+import httpx
 from google import genai
 from google.genai import types
 
@@ -8,16 +9,35 @@ import config
 
 logger = logging.getLogger(__name__)
 
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+POPULAR_OPENROUTER_MODELS = [
+    "google/gemini-2.0-flash-exp:free",
+    "google/gemini-2.0-flash-thinking-exp:free",
+    "openrouter/free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "deepseek/deepseek-r1:free",
+    "deepseek/deepseek-chat:free",
+]
+
 
 class GeminiService:
     def __init__(self):
-        self.api_key = config.GEMINI_API_KEY
+        self.openrouter_api_key = config.OPENROUTER_API_KEY
+        self.gemini_api_key = config.GEMINI_API_KEY
         self.model = config.GEMINI_MODEL
         self.system_instruction = config.SYSTEM_INSTRUCTION
+
+        self.mode = "openrouter" if self.openrouter_api_key else "gemini"
+
+        # История сообщений для OpenRouter: user_id -> list of message dicts
+        self._user_messages: Dict[int, List[dict]] = {}
+
+        # Клиент и чаты для прямого Gemini API
         self.client: Optional[genai.Client] = None
         self._user_chats: Dict[int, types.Chat] = {}
 
-    def _get_client(self) -> genai.Client:
+    def _get_gemini_client(self) -> genai.Client:
         if self.client is None:
             http_options_kwargs = {}
             if config.PROXY_URL:
@@ -29,17 +49,16 @@ class GeminiService:
                 http_options_kwargs["base_url"] = config.GEMINI_BASE_URL
 
             http_options = types.HttpOptions(**http_options_kwargs) if http_options_kwargs else None
-            self.client = genai.Client(api_key=self.api_key, http_options=http_options)
+            self.client = genai.Client(api_key=self.gemini_api_key, http_options=http_options)
         return self.client
 
-    def _get_or_create_chat(self, user_id: int):
-        client = self._get_client()
+    def _get_or_create_gemini_chat(self, user_id: int):
+        client = self._get_gemini_client()
         if user_id not in self._user_chats:
             gen_config = types.GenerateContentConfig(
                 system_instruction=self.system_instruction
             ) if self.system_instruction else None
 
-            # Создаем новую сессию чата для пользователя (асинхронный клиент)
             chat = client.aio.chats.create(
                 model=self.model,
                 config=gen_config,
@@ -47,33 +66,75 @@ class GeminiService:
             self._user_chats[user_id] = chat
         return self._user_chats[user_id]
 
+    async def _send_openrouter(self, user_id: int, text: str) -> str:
+        if user_id not in self._user_messages:
+            history = []
+            if self.system_instruction:
+                history.append({"role": "system", "content": self.system_instruction})
+            self._user_messages[user_id] = history
+
+        history = self._user_messages[user_id]
+        history.append({"role": "user", "content": text})
+
+        # Ограничиваем историю последними 20 сообщениями + system
+        if len(history) > 21:
+            system_msg = [m for m in history if m["role"] == "system"]
+            history = system_msg + history[-20:]
+            self._user_messages[user_id] = history
+
+        headers = {
+            "Authorization": f"Bearer {self.openrouter_api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/mikhaillobas-collab/telegram-gemini-bot",
+            "X-Title": "Telegram AI Assistant",
+        }
+        payload = {
+            "model": self.model,
+            "messages": history,
+        }
+
+        async with httpx.AsyncClient(timeout=90.0) as http_client:
+            resp = await http_client.post(OPENROUTER_URL, headers=headers, json=payload)
+            if resp.status_code != 200:
+                logger.error("OpenRouter error %s: %s", resp.status_code, resp.text)
+                return f"❌ Ошибка OpenRouter ({resp.status_code}): {resp.text}"
+
+            data = resp.json()
+            choices = data.get("choices", [])
+            if not choices or not choices[0].get("message"):
+                return "Модель вернула пустой ответ."
+
+            assistant_text = choices[0]["message"].get("content", "")
+            history.append({"role": "assistant", "content": assistant_text})
+            return assistant_text
+
     async def send_message(self, user_id: int, text: str) -> str:
         """
-        Отправляет сообщение в контекст диалога пользователя и возвращает ответ модели.
+        Отправляет сообщение в контекст диалога пользователя.
         """
         try:
-            chat = self._get_or_create_chat(user_id)
+            if self.mode == "openrouter":
+                return await self._send_openrouter(user_id, text)
+
+            # Режим прямого Gemini API
+            chat = self._get_or_create_gemini_chat(user_id)
             response = await chat.send_message(text)
             if response and response.text:
                 return response.text
             return "Модель вернула пустой ответ. Попробуйте сформулировать запрос иначе."
+
         except Exception as e:
-            logger.exception("Ошибка при обращении к Gemini API: %s", e)
+            logger.exception("Ошибка при обращении к ИИ API: %s", e)
             error_str = str(e)
             if "API_KEY_INVALID" in error_str or "API key not valid" in error_str:
-                return "❌ Ошибка: Указан неверный GEMINI_API_KEY. Проверьте настройки API-ключа."
+                return "❌ Ошибка: Неверный API-ключ."
             if "RESOURCE_EXHAUSTED" in error_str:
                 return "⏳ Превышен лимит запросов (Rate Limit). Пожалуйста, подождите минуту и повторите попытку."
             if "PERMISSIONDENIED" in error_str or "PERMISSION_DENIED" in error_str:
                 return (
-                    "❌ **Ошибка 403: Доступ заблокирован Google (PERMISSION_DENIED)**\n\n"
-                    "Причины:\n"
-                    "1. **Сервер находится в РФ**: Google Gemini API блокирует прямые запросы с российских IP.\n"
-                    "2. **Проект Google Cloud заблокирован**: Google наложил ограничения на проект, где создан ключ.\n\n"
-                    "**Как решить:**\n"
-                    "• Укажите прокси в переменной окружения `HTTPS_PROXY` (например, `http://user:pass@ip:port`)\n"
-                    "• Либо перенесите бота на любой зарубежный хостинг / VPS (Европа, Казахстан и т.д.)\n"
-                    "• Либо создайте ключ в НОВОМ проекте на aistudio.google.com под VPN."
+                    "❌ **Ошибка 403 (PERMISSION_DENIED)**\n\n"
+                    "Google требует настроить биллинг (Set up billing) в Google Cloud для этого проекта.\n"
+                    "Рекомендуется переключиться на бесплатный OpenRouter (указав `OPENROUTER_API_KEY`)."
                 )
             return f"❌ Ошибка при обработке запроса: {e}"
 
@@ -81,10 +142,14 @@ class GeminiService:
         """
         Сбрасывает контекст беседы для пользователя.
         """
+        cleared = False
+        if user_id in self._user_messages:
+            del self._user_messages[user_id]
+            cleared = True
         if user_id in self._user_chats:
             del self._user_chats[user_id]
-            return True
-        return False
+            cleared = True
+        return cleared
 
     def set_model(self, new_model: str) -> None:
         """
@@ -92,23 +157,24 @@ class GeminiService:
         """
         self.model = new_model.strip()
         self._user_chats.clear()
+        self._user_messages.clear()
 
     async def list_models(self) -> list[str]:
         """
-        Возвращает список доступных моделей Gemini для текущего API-ключа.
+        Возвращает список доступных моделей для текущего провайдера.
         """
-        client = self._get_client()
+        if self.mode == "openrouter":
+            return POPULAR_OPENROUTER_MODELS
+
+        client = self._get_gemini_client()
         models = []
         try:
             async for m in await client.aio.models.list():
-                # Отбираем модели, поддерживающие генерацию контента
                 name = m.name or ""
                 if "gemini" in name.lower():
-                    # Убираем префикс 'models/' для удобства
                     clean_name = name.replace("models/", "")
                     models.append(clean_name)
         except Exception as e:
             logger.exception("Ошибка при получении списка моделей: %s", e)
             raise e
         return models
-

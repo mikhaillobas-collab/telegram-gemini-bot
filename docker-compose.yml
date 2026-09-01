@@ -8,9 +8,11 @@ services:
         required: false
     environment:
       - TELEGRAM_BOT_TOKEN
+      - OPENROUTER_API_KEY
       - GEMINI_API_KEY
-      - ALLOWED_USER_IDS
+      - AI_MODEL
       - GEMINI_MODEL
+      - ALLOWED_USER_IDS
       - SYSTEM_INSTRUCTION
       - HTTPS_PROXY
       - PROXY_URL
