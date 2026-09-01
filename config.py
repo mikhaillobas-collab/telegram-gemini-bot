@@ -11,8 +11,8 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
-# Модель по умолчанию: если OpenRouter, то google/gemini-2.0-flash-exp:free или openrouter/free
-default_model = "google/gemini-2.0-flash-exp:free" if OPENROUTER_API_KEY else "gemini-3.6-flash"
+# Модель по умолчанию: если OpenRouter, то универсальный free-роутер openrouter/free
+default_model = "openrouter/free" if OPENROUTER_API_KEY else "gemini-3.6-flash"
 GEMINI_MODEL = (os.getenv("AI_MODEL") or os.getenv("GEMINI_MODEL") or default_model).strip()
 
 SYSTEM_INSTRUCTION = os.getenv(
