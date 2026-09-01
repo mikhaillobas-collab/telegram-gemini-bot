@@ -20,7 +20,7 @@
 TELEGRAM_BOT_TOKEN=ваш_токен_от_BotFather
 GEMINI_API_KEY=ваш_ключ_от_Google_AI_Studio
 ALLOWED_USER_IDS=276482250,381811957,387548739
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.6-flash
 SYSTEM_INSTRUCTION=Ты умный, вежливый и полезный персональный ИИ-ассистент. Отвечай структурированно, емко и по существу на том языке, на котором к тебе обратились.
 ```
 

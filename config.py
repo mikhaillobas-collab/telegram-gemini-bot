@@ -9,7 +9,7 @@ load_dotenv(BASE_DIR / ".env")
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
 SYSTEM_INSTRUCTION = os.getenv(
     "SYSTEM_INSTRUCTION",
     "Ты умный, вежливый и полезный персональный ИИ-ассистент. Отвечай структурированно, емко и по существу на том языке, на котором к тебе обратились.",
