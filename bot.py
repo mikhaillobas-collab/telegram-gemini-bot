@@ -9,8 +9,10 @@ from aiogram.enums import ChatAction, ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message, TelegramObject
+import base64
 
 import config
+import file_extractor
 from gemini_service import GeminiService
 
 logging.basicConfig(
@@ -97,12 +99,14 @@ async def cmd_start(message: Message):
         f"👋 Привет, {user_name}!\n\n"
         f"Я персональный ИИ-ассистент на базе Google Gemini (`{gemini_service.model}`).\n\n"
         f"💡 **Возможности:**\n"
-        f"• Вы можете задавать любые вопросы, ставить задачи, просить написать код.\n"
+        f"• Задавайте любые вопросы, ставьте задачи, просите написать код.\n"
+        f"• **Отправляйте документы и файлы** (PDF, Word DOCX, TXT, код, таблицы) — я проанализирую их и отвечу на вопросы!\n"
+        f"• **Отправляйте фото и сканы** — я распознаю текст и опишу изображение.\n"
         f"• Я сохраняю контекст нашей беседы.\n\n"
         f"📌 **Команды:**\n"
-        f"• /reset или /clear — сбросить контекст текущей беседы\n"
-        f"• /models — список моделей, доступных для вашего ключа\n"
-        f"• /setmodel <имя> — переключить модель на лету\n"
+        f"• /reset или /clear — сбросить контекст беседы\n"
+        f"• /models — список моделей\n"
+        f"• /setmodel <имя> — сменить модель\n"
         f"• /id — узнать ваш Telegram ID",
         parse_mode=ParseMode.MARKDOWN,
     )
@@ -171,6 +175,84 @@ async def handle_text(message: Message, bot: Bot):
 
     # Отправляем ответ пользователю
     await send_chunked_message(message, response_text)
+
+
+@dp.message(F.photo)
+async def handle_photo(message: Message, bot: Bot):
+    user_id = message.from_user.id
+    await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
+    try:
+        photo = message.photo[-1]
+        file_io = await bot.download(photo)
+        if not file_io:
+            await message.answer("Не удалось скачать фотографию.")
+            return
+
+        file_bytes = file_io.getvalue()
+        b64 = base64.b64encode(file_bytes).decode("utf-8")
+        caption = message.caption or ""
+        response_text = await gemini_service.send_image_message(user_id=user_id, caption=caption, image_b64=b64)
+        await send_chunked_message(message, response_text)
+    except Exception as e:
+        logger.exception("Ошибка при обработке фото: %s", e)
+        await message.answer(f"❌ Ошибка при обработке фото: {e}")
+
+
+@dp.message(F.document)
+async def handle_document(message: Message, bot: Bot):
+    user_id = message.from_user.id
+    doc = message.document
+    if not doc:
+        return
+
+    # Ограничение по размеру 20 МБ
+    if doc.file_size and doc.file_size > 20 * 1024 * 1024:
+        await message.answer("⚠️ Файл слишком большой. Максимальный размер: 20 МБ.")
+        return
+
+    await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
+    status_msg = await message.answer(f"⏳ Читаю документ `{doc.file_name}`...")
+
+    try:
+        file_io = await bot.download(doc)
+        if not file_io:
+            await status_msg.edit_text("Не удалось скачать файл из Telegram.")
+            return
+
+        file_bytes = file_io.getvalue()
+        content, is_image = file_extractor.process_file_bytes(
+            file_bytes=file_bytes,
+            filename=doc.file_name or "document",
+            mime_type=doc.mime_type
+        )
+
+        if is_image:
+            response_text = await gemini_service.send_image_message(
+                user_id=user_id,
+                caption=message.caption or "",
+                image_b64=content
+            )
+        else:
+            caption = message.caption or "Проанализируй этот документ и предоставь подробный разбор/резюме его содержания."
+            prompt = (
+                f"📁 [Прикреплённый документ: {doc.file_name}]\n\n"
+                f"{content}\n\n"
+                f"---\n"
+                f"Запрос пользователя к документу: {caption}"
+            )
+            response_text = await gemini_service.send_message(user_id=user_id, text=prompt)
+
+        # Удаляем временное статус-сообщение
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
+        await send_chunked_message(message, response_text)
+    except Exception as e:
+        logger.exception("Ошибка при обработке документа: %s", e)
+        await message.answer(f"❌ Ошибка при обработке документа: {e}")
+
 
 
 async def main():

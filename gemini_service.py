@@ -110,7 +110,7 @@ class GeminiService:
 
     async def send_message(self, user_id: int, text: str) -> str:
         """
-        Отправляет сообщение в контекст диалога пользователя.
+        Отправляет текстовое сообщение в контекст диалога пользователя.
         """
         try:
             if self.mode == "openrouter":
@@ -137,6 +137,70 @@ class GeminiService:
                     "Рекомендуется переключиться на бесплатный OpenRouter (указав `OPENROUTER_API_KEY`)."
                 )
             return f"❌ Ошибка при обработке запроса: {e}"
+
+    async def send_image_message(self, user_id: int, caption: str, image_b64: str) -> str:
+        """
+        Отправляет изображение с подписью/запросом модели.
+        """
+        prompt_text = caption.strip() if caption else "Опиши подробно, что изображено на этом фото/документе, и извлеки любой текст, если он есть."
+        try:
+            if self.mode == "openrouter":
+                if user_id not in self._user_messages:
+                    history = []
+                    if self.system_instruction:
+                        history.append({"role": "system", "content": self.system_instruction})
+                    self._user_messages[user_id] = history
+
+                history = self._user_messages[user_id]
+                history.append({
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt_text},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
+                    ]
+                })
+
+                headers = {
+                    "Authorization": f"Bearer {self.openrouter_api_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://github.com/mikhaillobas-collab/telegram-gemini-bot",
+                    "X-Title": "Telegram AI Assistant",
+                }
+                payload = {
+                    "model": self.model,
+                    "messages": history,
+                }
+
+                async with httpx.AsyncClient(timeout=90.0) as http_client:
+                    resp = await http_client.post(OPENROUTER_URL, headers=headers, json=payload)
+                    if resp.status_code != 200:
+                        logger.error("OpenRouter error %s: %s", resp.status_code, resp.text)
+                        return f"❌ Ошибка OpenRouter ({resp.status_code}): {resp.text}"
+
+                    data = resp.json()
+                    choices = data.get("choices", [])
+                    if not choices or not choices[0].get("message"):
+                        return "Модель вернула пустой ответ."
+
+                    assistant_text = choices[0]["message"].get("content", "")
+                    history.append({"role": "assistant", "content": assistant_text})
+                    return assistant_text
+            else:
+                import base64
+                chat = self._get_or_create_gemini_chat(user_id)
+                part = types.Part.from_bytes(
+                    data=base64.b64decode(image_b64),
+                    mime_type="image/jpeg"
+                )
+                response = await chat.send_message([part, prompt_text])
+                if response and response.text:
+                    return response.text
+                return "Модель вернула пустой ответ."
+
+        except Exception as e:
+            logger.exception("Ошибка при обработке изображения: %s", e)
+            return f"❌ Ошибка при обработке изображения: {e}"
+
 
     def reset_chat(self, user_id: int) -> bool:
         """
