@@ -95,14 +95,15 @@ async def cmd_start(message: Message):
     user_name = message.from_user.first_name if message.from_user else "пользователь"
     await message.answer(
         f"👋 Привет, {user_name}!\n\n"
-        f"Я персональный ИИ-ассистент на базе Google Gemini (`{config.GEMINI_MODEL}`).\n\n"
+        f"Я персональный ИИ-ассистент на базе Google Gemini (`{gemini_service.model}`).\n\n"
         f"💡 **Возможности:**\n"
         f"• Вы можете задавать любые вопросы, ставить задачи, просить написать код.\n"
         f"• Я сохраняю контекст нашей беседы.\n\n"
         f"📌 **Команды:**\n"
-        f"• /reset или /clear — сбросить контекст текущей беседы и начать заново\n"
-        f"• /id — узнать ваш Telegram ID\n"
-        f"• /model — текущая модель",
+        f"• /reset или /clear — сбросить контекст текущей беседы\n"
+        f"• /models — список моделей, доступных для вашего ключа\n"
+        f"• /setmodel <имя> — переключить модель на лету\n"
+        f"• /id — узнать ваш Telegram ID",
         parse_mode=ParseMode.MARKDOWN,
     )
 
@@ -122,7 +123,39 @@ async def cmd_id(message: Message):
 
 @dp.message(Command("model"))
 async def cmd_model(message: Message):
-    await message.answer(f"Текущая модель: `{config.GEMINI_MODEL}`", parse_mode=ParseMode.MARKDOWN)
+    await message.answer(f"Текущая активная модель: `{gemini_service.model}`", parse_mode=ParseMode.MARKDOWN)
+
+
+@dp.message(Command("models"))
+async def cmd_models(message: Message):
+    await message.answer("🔍 Запрашиваю список доступных моделей у Google API...")
+    try:
+        models = await gemini_service.list_models()
+        if not models:
+            await message.answer("Не удалось получить список моделей или список пуст.")
+            return
+
+        text = "📋 **Доступные модели для вашего API-ключа:**\n\n"
+        for m in models:
+            prefix = "👉 " if m == gemini_service.model else "• "
+            text += f"{prefix}`{m}`\n"
+        text += "\nЧтобы переключить модель, отправьте:\n`/setmodel <название_модели>`"
+        await send_chunked_message(message, text)
+    except Exception as e:
+        await message.answer(f"❌ Ошибка при запросе списка моделей: `{e}`", parse_mode=ParseMode.MARKDOWN)
+
+
+@dp.message(Command("setmodel"))
+async def cmd_setmodel(message: Message):
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2 or not args[1].strip():
+        await message.answer("Укажите модель. Пример:\n`/setmodel gemini-3.6-flash`", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    new_model = args[1].strip()
+    gemini_service.set_model(new_model)
+    await message.answer(f"✅ Модель успешно изменена на: `{new_model}`.\nКонтекст беседы сброшен.", parse_mode=ParseMode.MARKDOWN)
+
 
 
 @dp.message(F.text)

@@ -64,3 +64,30 @@ class GeminiService:
             del self._user_chats[user_id]
             return True
         return False
+
+    def set_model(self, new_model: str) -> None:
+        """
+        Устанавливает новую модель и сбрасывает текущие сессии.
+        """
+        self.model = new_model.strip()
+        self._user_chats.clear()
+
+    async def list_models(self) -> list[str]:
+        """
+        Возвращает список доступных моделей Gemini для текущего API-ключа.
+        """
+        client = self._get_client()
+        models = []
+        try:
+            async for m in await client.aio.models.list():
+                # Отбираем модели, поддерживающие генерацию контента
+                name = m.name or ""
+                if "gemini" in name.lower():
+                    # Убираем префикс 'models/' для удобства
+                    clean_name = name.replace("models/", "")
+                    models.append(clean_name)
+        except Exception as e:
+            logger.exception("Ошибка при получении списка моделей: %s", e)
+            raise e
+        return models
+
