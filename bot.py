@@ -8,11 +8,12 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ChatAction, ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message, TelegramObject
+from aiogram.types import BufferedInputFile, Message, TelegramObject
 import base64
 
 import config
 import file_extractor
+import file_generator
 from gemini_service import GeminiService
 
 logging.basicConfig(
@@ -92,16 +93,35 @@ async def send_chunked_message(message: Message, text: str):
             await message.answer(chunk, parse_mode=None)
 
 
+async def send_response_and_files(message: Message, raw_response: str):
+    """
+    Извлекает сгенерированные файлы (Excel, Word, PDF), отправляет пользователю
+    чистый текстовый ответ без JSON-блоков и прикрепляет созданные файлы.
+    """
+    cleaned_text, generated_files = file_generator.extract_and_generate_files(raw_response)
+    if cleaned_text:
+        await send_chunked_message(message, cleaned_text)
+
+    for file_bytes, filename in generated_files:
+        try:
+            input_file = BufferedInputFile(file_bytes, filename=filename)
+            await message.answer_document(document=input_file)
+        except Exception as e:
+            logger.exception("Ошибка отправки файла %s: %s", filename, e)
+            await message.answer(f"❌ Не удалось отправить сформированный файл `{filename}`: {e}")
+
+
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
     user_name = message.from_user.first_name if message.from_user else "пользователь"
     await message.answer(
         f"👋 Привет, {user_name}!\n\n"
-        f"Я персональный ИИ-ассистент на базе Google Gemini (`{gemini_service.model}`).\n\n"
+        f"Я персональный ИИ-ассистент на базе `{gemini_service.model}`.\n\n"
         f"💡 **Возможности:**\n"
         f"• Задавайте любые вопросы, ставьте задачи, просите написать код.\n"
-        f"• **Отправляйте документы и файлы** (PDF, Word DOCX, TXT, код, таблицы) — я проанализирую их и отвечу на вопросы!\n"
-        f"• **Отправляйте фото и сканы** — я распознаю текст и опишу изображение.\n"
+        f"• **Генерация файлов**: попросите «создай смету в Excel», «напиши договор в Word» или «сделай презентацию в PDF» — и я сгенерирую готовый файл!\n"
+        f"• **Чтение документов**: отправляйте файлы (PDF, Word DOCX, TXT, код, таблицы) — я проанализирую их и отвечу на вопросы!\n"
+        f"• **Чтение фото и сканов**: отправляйте фото — я распознаю текст и опишу детали.\n"
         f"• Я сохраняю контекст нашей беседы.\n\n"
         f"📌 **Команды:**\n"
         f"• /reset или /clear — сбросить контекст беседы\n"
@@ -173,8 +193,8 @@ async def handle_text(message: Message, bot: Bot):
     # Получаем ответ от Gemini
     response_text = await gemini_service.send_message(user_id=user_id, text=user_text)
 
-    # Отправляем ответ пользователю
-    await send_chunked_message(message, response_text)
+    # Отправляем ответ пользователю (включая сгенерированные файлы)
+    await send_response_and_files(message, response_text)
 
 
 @dp.message(F.photo)
@@ -192,7 +212,7 @@ async def handle_photo(message: Message, bot: Bot):
         b64 = base64.b64encode(file_bytes).decode("utf-8")
         caption = message.caption or ""
         response_text = await gemini_service.send_image_message(user_id=user_id, caption=caption, image_b64=b64)
-        await send_chunked_message(message, response_text)
+        await send_response_and_files(message, response_text)
     except Exception as e:
         logger.exception("Ошибка при обработке фото: %s", e)
         await message.answer(f"❌ Ошибка при обработке фото: {e}")
@@ -248,7 +268,7 @@ async def handle_document(message: Message, bot: Bot):
         except Exception:
             pass
 
-        await send_chunked_message(message, response_text)
+        await send_response_and_files(message, response_text)
     except Exception as e:
         logger.exception("Ошибка при обработке документа: %s", e)
         await message.answer(f"❌ Ошибка при обработке документа: {e}")
