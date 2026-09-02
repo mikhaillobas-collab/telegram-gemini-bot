@@ -11,8 +11,8 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
-# Модель по умолчанию: мощная бесплатная модель Llama 3.3 70B или DeepSeek
-default_model = "meta-llama/llama-3.3-70b-instruct:free" if OPENROUTER_API_KEY else "gemini-3.6-flash"
+# Модель по умолчанию: актуальная живая бесплатная модель Google Gemma 4 31B
+default_model = "google/gemma-4-31b-it:free" if OPENROUTER_API_KEY else "gemini-3.6-flash"
 GEMINI_MODEL = (os.getenv("AI_MODEL") or os.getenv("GEMINI_MODEL") or default_model).strip()
 
 DEFAULT_SYSTEM_INSTRUCTION = """Ты умный, вежливый и полезный персональный ИИ-ассистент. Отвечай структурированно, емко и по существу.
