@@ -182,6 +182,58 @@ def create_word_file(data: Dict[str, Any]) -> Tuple[bytes, str]:
         sub_run.font.italic = True
         sub_run.font.color.rgb = RGBColor(120, 120, 120)
 
+    # Автоматический анализ: если в документе есть таблица поколений или родства, но схема не передана явно
+    if "scheme" not in data or not isinstance(data.get("scheme"), dict):
+        table_candidate = data.get("table")
+        if not table_candidate and "sections" in data:
+            for sec in data.get("sections", []):
+                if "table" in sec and isinstance(sec["table"], dict):
+                    table_candidate = sec["table"]
+                    break
+
+        if table_candidate and isinstance(table_candidate, dict):
+            headers = [str(h).lower() for h in table_candidate.get("headers", [])]
+            if any(kw in " ".join(headers) for kw in ["поколен", "линия", "родств", "предки", "сестр"]):
+                rows = table_candidate.get("rows", [])
+                nodes = []
+                edges = []
+                prev_nodes: Dict[int, str] = {}
+                for r_idx, row in enumerate(rows):
+                    gen_lbl = str(row[0]) if len(row) > 0 else f"Поколение {r_idx + 1}"
+                    for c_idx in range(1, len(row)):
+                        val = str(row[c_idx]).strip()
+                        if not val or val in ["—", "-", "None"]:
+                            continue
+                        col_h = table_candidate.get("headers", [])[c_idx] if c_idx < len(table_candidate.get("headers", [])) else ""
+                        node_id = f"node_{r_idx}_{c_idx}"
+                        if c_idx > 1 and row[c_idx] == row[c_idx - 1]:
+                            prev_nodes[c_idx] = prev_nodes.get(c_idx - 1, node_id)
+                            continue
+                        parts = val.split(",", 1)
+                        n_name = parts[0].strip()
+                        n_desc = parts[1].strip() if len(parts) > 1 else ""
+                        color = "#1E3A8A" if r_idx == 0 else ("#2563EB" if c_idx == 1 else "#059669")
+                        nodes.append({
+                            "id": node_id,
+                            "title": f"{gen_lbl} • {col_h}",
+                            "name": n_name,
+                            "desc": n_desc,
+                            "level": r_idx,
+                            "color": color
+                        })
+                        if c_idx in prev_nodes:
+                            edges.append({"from": prev_nodes[c_idx], "to": node_id, "label": "потомок"})
+                        elif 1 in prev_nodes and r_idx > 0:
+                            edges.append({"from": prev_nodes[1], "to": node_id, "label": "потомок"})
+                        prev_nodes[c_idx] = node_id
+                if len(nodes) >= 2:
+                    data["scheme"] = {
+                        "title": data.get("title", "ГЕНЕАЛОГИЧЕСКАЯ СХЕМА РОДСТВЕННЫХ СВЯЗЕЙ"),
+                        "subtitle": data.get("subtitle", "Схема родства между заявителем и наследодателем"),
+                        "nodes": nodes,
+                        "edges": edges
+                    }
+
     # 1. Если в документе запрошена встроенная схема родства (scheme)
     if "scheme" in data and isinstance(data["scheme"], dict):
         try:
@@ -603,6 +655,13 @@ def extract_and_generate_files(raw_text: str) -> Tuple[str, List[Tuple[bytes, st
             data = json.loads(match.group(1).strip())
             file_bytes, filename = create_word_file(data)
             files.append((file_bytes, filename))
+            # Если в документе была создана схема родства (включая авто-синтезированную), прикладываем её отдельным PNG!
+            if "scheme" in data and isinstance(data["scheme"], dict):
+                try:
+                    s_bytes, _ = visual_generator.create_kinship_tree(data["scheme"])
+                    files.append((s_bytes, "Схема_родственных_связей.png"))
+                except Exception as ex:
+                    logger.warning("Не удалось экспортировать отдельную схему PNG: %s", ex)
             cleaned_text = cleaned_text.replace(match.group(0), "").strip()
         except Exception as e:
             logger.warning("Ошибка парсинга блока Word: %s", e)
