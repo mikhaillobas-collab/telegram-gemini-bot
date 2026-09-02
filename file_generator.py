@@ -34,29 +34,39 @@ logger = logging.getLogger(__name__)
 CYRILLIC_FONT = "Helvetica"
 CYRILLIC_BOLD = "Helvetica-Bold"
 
-FONT_CANDIDATES = [
-    # Linux (Debian / Ubuntu / Docker / bothost)
-    ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
-    ("/usr/share/fonts/dejavu/DejaVuSans.ttf", "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf"),
-    ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
-    # Windows
-    ("C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/arialbd.ttf"),
-    ("C:/Windows/Fonts/calibri.ttf", "C:/Windows/Fonts/calibrib.ttf"),
-]
+try:
+    import matplotlib.font_manager as fm
+    dejavu_reg = fm.findfont("DejaVu Sans")
+    dejavu_bold = fm.findfont("DejaVu Sans:weight=bold")
+    if os.path.exists(dejavu_reg):
+        pdfmetrics.registerFont(TTFont("CustomCyrillic", dejavu_reg))
+        CYRILLIC_FONT = "CustomCyrillic"
+    if os.path.exists(dejavu_bold):
+        pdfmetrics.registerFont(TTFont("CustomCyrillicBold", dejavu_bold))
+        CYRILLIC_BOLD = "CustomCyrillicBold"
+    else:
+        CYRILLIC_BOLD = CYRILLIC_FONT
+except Exception as e:
+    logger.warning("Ошибка поиска шрифта через matplotlib: %s", e)
 
-for reg_path, bold_path in FONT_CANDIDATES:
-    if os.path.exists(reg_path):
-        try:
-            pdfmetrics.registerFont(TTFont("CustomCyrillic", reg_path))
-            CYRILLIC_FONT = "CustomCyrillic"
-            if os.path.exists(bold_path):
-                pdfmetrics.registerFont(TTFont("CustomCyrillicBold", bold_path))
-                CYRILLIC_BOLD = "CustomCyrillicBold"
-            else:
-                CYRILLIC_BOLD = "CustomCyrillic"
-            break
-        except Exception as e:
-            logger.warning("Не удалось зарегистрировать шрифт %s: %s", reg_path, e)
+if CYRILLIC_FONT == "Helvetica":
+    FONT_CANDIDATES = [
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        ("C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/arialbd.ttf"),
+    ]
+    for reg_path, bold_path in FONT_CANDIDATES:
+        if os.path.exists(reg_path):
+            try:
+                pdfmetrics.registerFont(TTFont("CustomCyrillic", reg_path))
+                CYRILLIC_FONT = "CustomCyrillic"
+                if os.path.exists(bold_path):
+                    pdfmetrics.registerFont(TTFont("CustomCyrillicBold", bold_path))
+                    CYRILLIC_BOLD = "CustomCyrillicBold"
+                else:
+                    CYRILLIC_BOLD = "CustomCyrillic"
+                break
+            except Exception as e:
+                logger.warning("Не удалось зарегистрировать шрифт %s: %s", reg_path, e)
 
 
 # ==============================================================================
